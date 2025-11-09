@@ -6,138 +6,87 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link href="https://unpkg.com/maplibre-gl@3.5.2/dist/maplibre-gl.css" rel="stylesheet" />
   <style>
-    html, body { margin: 0; padding: 0; height: 100%; }
-    #map { width: 100%; height: 100%; }
+    html, body { margin:0; padding:0; height:100%; }
+    #map { width:100%; height:100%; }
     .ui {
-      position: absolute; top: 10px; left: 10px; z-index: 10;
-      background: rgba(255,255,255,0.9); padding: 8px 10px; border-radius: 8px;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; font-size: 14px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      position:absolute; top:10px; left:10px; z-index:10;
+      background:rgba(255,255,255,0.9); padding:8px 10px; border-radius:8px;
+      font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; font-size:14px;
+      box-shadow:0 2px 8px rgba(0,0,0,0.1);
     }
-    .ui input { width: 80px; }
-    .error {
-      position: absolute; bottom: 10px; left: 10px; right: 10px; z-index: 10;
-      background: #ffe9e9; color: #8a0000; border: 1px solid #ffb3b3; padding: 8px 10px; border-radius: 6px;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; display:none;
-    }
+    .ui input { width:80px; }
   </style>
 </head>
 <body>
   <div id="map"></div>
   <div class="ui">
     <label>Radius (km): <input id="radiusKm" type="number" min="0.1" step="0.1" value="1.0" /></label>
-    <button id="drawBtn">Draw &amp; (later) Sum Pop</button>
+    <button id="drawBtn">Draw circle</button>
   </div>
-  <div id="err" class="error"></div>
 
   <script src="https://unpkg.com/maplibre-gl@3.5.2/dist/maplibre-gl.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
   <script>
-    // --- Config: tiles folder (relative to this HTML) ---
-    const TILES_BASE = './QGISTilesOutput'; // keep this folder name the same as your repo
-    const TILES_URL = `${TILES_BASE}/{z}/{x}/{y}.pbf`;
-    const METADATA_URL = `${TILES_BASE}/metadata.json`;
+    // Tiles folder must sit next to index.html like: /QGISTilesOutput/{z}/{x}/{y}.pbf
+    const TILES_URL = './QGISTilesOutput/{z}/{x}/{y}.pbf';
+    const SOURCE_LAYER_ID = 'population'; // we set this during export
 
-    const errBox = document.getElementById('err');
-    function showError(msg) {
-      errBox.textContent = msg;
-      errBox.style.display = 'block';
-      console.error(msg);
-    }
-
-    // Helper: fetch metadata.json to discover the vector layer name
-    async function getVectorLayerId() {
-      const r = await fetch(METADATA_URL);
-      if (!r.ok) throw new Error(`Could not fetch metadata.json (${r.status}) – check that QGISTilesOutput/ is next to index.html`);
-      const meta = await r.json();
-      const layers = (meta && meta.vector_layers) || [];
-      if (!layers.length) throw new Error('metadata.json has no vector_layers array.');
-      // Use the first layer by default
-      return layers[0].id;
-    }
-
-    (async function init() {
-      let sourceLayerId = 'population';
-      try {
-        sourceLayerId = await getVectorLayerId();
-      } catch (e) {
-        showError(e.message);
-      }
-
-      const map = new maplibregl.Map({
-        container: 'map',
-        style: {
-          version: 8,
-          sources: {
-            population: {
-              type: 'vector',
-              tiles: [ TILES_URL ],
-              minzoom: 8,
-              maxzoom: 14
-            }
-          },
-          layers: [
-            {
-              id: 'population-fill',
-              type: 'fill',
-              source: 'population',
-              'source-layer': sourceLayerId,
-              paint: { 'fill-color': '#4caf50', 'fill-opacity': 0.45 }
-            },
-            {
-              id: 'population-outline',
-              type: 'line',
-              source: 'population',
-              'source-layer': sourceLayerId,
-              paint: { 'line-color': '#333', 'line-width': 0.4 }
-            }
-          ]
+    const map = new maplibregl.Map({
+      container: 'map',
+      style: {
+        version: 8,
+        sources: {
+          population: {
+            type: 'vector',
+            tiles: [ TILES_URL ],
+            minzoom: 8,
+            maxzoom: 14
+          }
         },
-        center: [-79.4, 43.7], // Toronto area
-        zoom: 10
+        layers: [
+          {
+            id: 'population-fill',
+            type: 'fill',
+            source: 'population',
+            'source-layer': SOURCE_LAYER_ID,
+            paint: { 'fill-color': '#4caf50', 'fill-opacity': 0.45 }
+          },
+          {
+            id: 'population-outline',
+            type: 'line',
+            source: 'population',
+            'source-layer': SOURCE_LAYER_ID,
+            paint: { 'line-color': '#333', 'line-width': 0.4 }
+          }
+        ]
+      },
+      center: [-79.4, 43.7],
+      zoom: 10
+    });
+
+    function drawAt(lngLat) {
+      const km = parseFloat(document.getElementById('radiusKm').value);
+      if (!km || km <= 0) return;
+      const circle = turf.circle([lngLat.lng, lngLat.lat], km, { units: 'kilometers', steps: 180 });
+
+      if (map.getLayer('circle-fill')) map.removeLayer('circle-fill');
+      if (map.getSource('circle')) map.removeSource('circle');
+
+      map.addSource('circle', { type: 'geojson', data: circle });
+      map.addLayer({
+        id: 'circle-fill',
+        type: 'fill',
+        source: 'circle',
+        paint: { 'fill-color': '#2196f3', 'fill-opacity': 0.22 }
       });
+    }
 
-      // Draw circle on click using the radius control
-      function drawAt(lngLat) {
-        const radiusKm = parseFloat(document.getElementById('radiusKm').value);
-        if (!radiusKm || radiusKm <= 0) return;
+    map.on('click', (e) => drawAt(e.lngLat));
+    document.getElementById('drawBtn').addEventListener('click', () => drawAt(map.getCenter()));
 
-        const circle = turf.circle([lngLat.lng, lngLat.lat], radiusKm, { units: 'kilometers', steps: 180 });
-
-        // Clean previous
-        if (map.getLayer('circle-fill')) map.removeLayer('circle-fill');
-        if (map.getSource('circle')) map.removeSource('circle');
-
-        map.addSource('circle', { type: 'geojson', data: circle });
-        map.addLayer({
-          id: 'circle-fill',
-          type: 'fill',
-          source: 'circle',
-          paint: { 'fill-color': '#2196f3', 'fill-opacity': 0.22 }
-        });
-
-        new maplibregl.Popup()
-          .setLngLat(lngLat)
-          .setHTML(`<strong>Radius:</strong> ${radiusKm} km<br/><em>(Population sum coming next)</em>`)
-          .addTo(map);
-      }
-
-      map.on('click', (e) => drawAt(e.lngLat));
-      document.getElementById('drawBtn').addEventListener('click', () => {
-        const c = map.getCenter();
-        drawAt({ lng: c.lng, lat: c.lat });
-      });
-
-      // Basic network diagnostics in console
-      map.on('error', (ev) => {
-        if (ev && ev.error) console.warn('Map error:', ev.error);
-      });
-
-      // Optional: Log when tiles fail (use DevTools → Network too)
-      map.on('data', (e) => {
-        // e.dataType === 'source' etc. Keep minimal.
-      });
-    })();
+    map.on('error', (ev) => {
+      if (ev && ev.error) console.warn('Map error:', ev.error);
+    });
   </script>
 </body>
 </html>
